@@ -86,14 +86,13 @@ class DNSServer:
 
 
 class DNSAPI:
-    # usage: /add?domian=xxxx&ip=xx.xx.xx.xx&key=xxxxx
-    #        /delete?domian=xxxx&ip=xx.xx.xx.xx&key=xxxxx
-    
+    # usage: /add?domian=xxxx&ip=xx.xx.xx.xx&pubkey=xxxxx
+    #        /delete?domian=xxxx&ip=xx.xx.xx.xx&prikey=xxxxx
+
     def __init__(self, hostname, port, db_file):
         self.hostname = hostname
         self.port = port
         self.db_file = db_file
-
 
     def run(self):
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -108,17 +107,17 @@ class DNSAPI:
             # 处理请求
             t = threading.Thread(target=self.handle_tcp_request, args=(conn,))
             t.start()
-            
-    def handle_tcp_request(self,conn):
+
+    def handle_tcp_request(self, conn):
         request = conn.recv(1024).decode('utf-8')
         response = self.handle_http_request(request)
         conn.send(response)
         conn.close()
 
     def handle_http_request(self, request):
-        request_line, headers= request.split('\r\n\r\n', 2)
+        request_line, headers = request.split('\r\n\r\n', 2)
         method, url, version = request_line.split(' ', 2)
-        print(method,url)
+        print(method, url)
         if method == 'GET':
             response = self.handle_get_request(url)
         else:
@@ -127,26 +126,26 @@ class DNSAPI:
 
     def handle_get_request(self, url):
         # check url start with /add
-        if re.match(r'^/add\?',url):
+        if re.match(r'^/add\?', url):
             status_code = self.add_data(url[5:])
-            if status_code = 200:
+            if status_code == 200:
                 reason_phrase = 'Add data successful'
             else:
                 reason_phrase = 'Add data unsuccessful'
-        # check url start with /delete        
-        elif re.match(r'^/delete\?',url):
+        # check url start with /delete
+        elif re.match(r'^/delete\?', url):
             status_code = self.delete_data(url[9:])
-            if status_code = 200:
+            if status_code == 200:
                 reason_phrase = 'Delete data successful'
             else:
                 reason_phrase = 'Delete data unsuccessful'
         else:
             status_code = 400
             reason_phrase = 'unsupport api'
-            
+
         headers = {
-        'Content-Type': 'text/html',
-        'Connection': 'close',
+            'Content-Type': 'text/html',
+            'Connection': 'close',
         }
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
@@ -155,25 +154,38 @@ class DNSAPI:
         status_code = 400
         reason_phrase = "unsupport method"
         headers = {
-        'Content-Type': 'text/html',
-        'Connection': 'close',
+            'Content-Type': 'text/html',
+            'Connection': 'close',
         }
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
-    
+
     def add_data(self, url):
         domain = re.search(r'domain=([^&]+)', url)
         ip = re.search(r'ip=([^&]+)', url)
-        key = re.search(r'ip=([^&]+)', url)
+        pubkey = re.search(r'pubkey=([^&]+)', url)
         if domain and ip and key:
             domain = domain.group(1)
             ip = ip.group(1)
-            key = key.group(1)
+            pubkey = pubkey.group(1)
         else:
             return 400
-        return 200
-    
-    def delete_data(self,url):
+        conn = sqlite3.connect(self.db_file)
+        c = conn.cursor()
+
+        # Check if the data already exists
+        c.execute(
+            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ? OR pubkey = ?", (domain, ip, pubkey))
+        existing_data = c.fetchall()
+        if existing_data:
+            return 400
+        else:
+            # Insert the new data
+            c.execute(
+                "INSERT INTO xiaomiandns (domain, ip, pubkey) VALUES (?, ?, ?)", (domain, ip, pubkey))
+            return 200
+
+    def delete_data(self, url):
         m = re.search(r'domain=([^&]+)', url)
         if m:
             domain = m.group(1)
@@ -181,7 +193,6 @@ class DNSAPI:
         else:
             print('not matched')
         return 200
-        
 
 
 if __name__ == '__main__':

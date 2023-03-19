@@ -1,6 +1,6 @@
 import sqlite3
 
-db_file = 'dns.db'
+db_file = 'database/dns.db'
 if __name__ == '__main__':
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()

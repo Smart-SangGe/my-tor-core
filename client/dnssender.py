@@ -14,9 +14,11 @@ def resolver(domain):
         return ip
     except dns.resolver.NXDOMAIN:
         print("can't find IP")
+        
 
 
-if __name__ = "__main__":
+
+if __name__ == "__main__":
     domain = 'mamahaha.work'
     ip = resolver(domain)
     print(ip)
