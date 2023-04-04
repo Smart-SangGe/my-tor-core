@@ -10,6 +10,7 @@ import dns.rrset
 import time
 import sqlite3
 import re
+import base64
 
 
 class DNSServer:
@@ -68,7 +69,7 @@ class DNSServer:
         name = question.question[0].name
         # search domain in database
         dbcursor.execute(
-            "SELECT ip FROM xiaomiandns WHERE domain = ?", (str(name)[:-1],))
+            "SELECT ip FROM xiaomiandns WHERE domain = ? AND nodetype = client", (str(name)[:-1],))
         result = dbcursor.fetchone()
 
         # Create a new RRset for the answer
@@ -86,8 +87,12 @@ class DNSServer:
 
 
 class DNSAPI:
-    # usage: /add?domian=xxxx&ip=xx.xx.xx.xx&pubkey=xxxxx
-    #        /delete?domian=xxxx&ip=xx.xx.xx.xx&prikey=xxxxx
+    # usage: use POST method
+    #        /add
+    #        data: domian=xxxx&ip=xx.xx.xx.xx&pubkey=xxxxx&nodetype=xxxx
+    #        /delete
+    #        data: domian=xxxx&ip=xx.xx.xx.xx&prikey=xxxxx&nodetype=xxxx
+    
 
     def __init__(self, hostname, port, db_file):
         self.hostname = hostname
@@ -117,24 +122,53 @@ class DNSAPI:
     def handle_http_request(self, request):
         request_line, headers = request.split('\r\n\r\n', 2)
         method, url, version = request_line.split(' ', 2)
-        print(method, url)
+
         if method == 'GET':
             response = self.handle_get_request(url)
+        elif method == 'POST':
+            data = request.split('\r\n')[-1]
+            response = self.handle_post_request(url, data)
         else:
             response = self.handle_error_request()
+            
         return response
 
     def handle_get_request(self, url):
+        
+        # check url start with /add
+        # if re.match(r'^/add\?', url):
+        #     status_code = self.add_data(url[5:])
+        #     if status_code == 200:
+        #         reason_phrase = 'Add data successful'
+        #     else:
+        #         reason_phrase = 'Add data unsuccessful'
+        # # check url start with /delete
+        # elif re.match(r'^/delete\?', url):
+        #     status_code = self.delete_data(url[9:])
+        #     if status_code == 200:
+        #         reason_phrase = 'Delete data successful'
+        #     else:
+        #         reason_phrase = 'Delete data unsuccessful'
+        # else:
+        #     status_code = 400
+        #     reason_phrase = 'unsupport api'
+
+        response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
+        return response.encode("utf-8")
+
+    def handle_post_request(self, url, data):
+        # 处理 POST 请求，data 是 POST 方法提交的数据
+        
         # check url start with /add
         if re.match(r'^/add\?', url):
-            status_code = self.add_data(url[5:])
+            status_code = self.add_data(data)
             if status_code == 200:
                 reason_phrase = 'Add data successful'
             else:
                 reason_phrase = 'Add data unsuccessful'
         # check url start with /delete
         elif re.match(r'^/delete\?', url):
-            status_code = self.delete_data(url[9:])
+            status_code = self.delete_data(data)
             if status_code == 200:
                 reason_phrase = 'Delete data successful'
             else:
@@ -142,11 +176,7 @@ class DNSAPI:
         else:
             status_code = 400
             reason_phrase = 'unsupport api'
-
-        headers = {
-            'Content-Type': 'text/html',
-            'Connection': 'close',
-        }
+        
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
 
@@ -161,41 +191,108 @@ class DNSAPI:
         return response.encode("utf-8")
 
     def add_data(self, url):
-        domain = re.search(r'domain=([^&]+)', url)
-        ip = re.search(r'ip=([^&]+)', url)
-        pubkey = re.search(r'pubkey=([^&]+)', url)
-        if domain and ip and key:
-            domain = domain.group(1)
-            ip = ip.group(1)
-            pubkey = pubkey.group(1)
-        else:
+
+        # parse and check validation
+        domain, ip, pubkey, nodetype = parse_data(url)
+
+        if not check_data(url):
             return 400
+
+        # connect db
         conn = sqlite3.connect(self.db_file)
         c = conn.cursor()
 
         # Check if the data already exists
         c.execute(
-            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ? OR pubkey = ?", (domain, ip, pubkey))
+            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ? OR pubkey = ? OR nodetype = ?", (domain, ip, pubkey, nodetype))
         existing_data = c.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
         if existing_data:
             return 400
         else:
             # Insert the new data
             c.execute(
-                "INSERT INTO xiaomiandns (domain, ip, pubkey) VALUES (?, ?, ?)", (domain, ip, pubkey))
+                "INSERT INTO xiaomiandns (domain,ip,pubkey,nodetype,timestamp) VALUES (?,?,?,?,DATETIME('now'))", (domain, ip, pubkey, nodetype))
             return 200
 
     def delete_data(self, url):
-        m = re.search(r'domain=([^&]+)', url)
-        if m:
-            domain = m.group(1)
-            print(domain)
+
+        # parse and check validation
+        domain, ip, privkey, nodetype = parse_data(url)
+
+        if not check_data(url):
+            return 400
+
+        # connect db
+        conn = sqlite3.connect(self.db_file)
+        c = conn.cursor()
+
+        c.execute(
+            "SELECT pubkey FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, pubkey, nodetype))
+        pubkey = c.fetchone()[0]
+        pubkey = pubkey
+        cursor.close()
+        conn.close()
+        
+        
+        
+        if existing_data:
+            return 400
         else:
-            print('not matched')
-        return 200
+            # Insert the new data
+            c.execute(
+                "INSERT INTO xiaomiandns (domain,ip,pubkey,nodetype,timestamp) VALUES (?,?,?,?,DATETIME('now'))", (domain, ip, pubkey, nodetype))
+            return 200
+
+    def parse_data(self, url):
+
+        domain = re.search(r'domain=([^&]+)', url)
+        ip = re.search(r'ip=([^&]+)', url)
+        pubkey = re.search(r'pubkey=([^&]+)', url)
+        privkey = re.search(r'privkey=([^&]+)', url)
+        nodetype = re.search(r'nodetype=([^]+)', url)
+
+        if domain and ip and nodetype:
+            domain = domain.group(1)
+            ip = ip.group(1)
+            nodetype = nodetype.group(1)
+            if bool(pubkey) != bool(privkey):
+                if pubkey:
+                    key = pubkey.group(1)
+                else:
+                    key = privkey.group(1)
+        return domain, ip, key, nodetype
+
+    def check_data(self, domain, ip, nodetype):
+
+        # check domain
+        pattern = r'^[a-z0-9]{16}\.xiaomian$'
+        
+        if re.match(pattern, domain):
+            return True
+        else:
+            return False
+        
+        # check ip
+        pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        if re.match(pattern, ip):
+            octets = ip.split('.')
+            if all(int(octet) < 256 for octet in octets):
+                return True
+        return False
+        
+        # check nodetype
+        if nodetype in {"server", "client", "node"}:
+            return True
+        else:
+            return False
 
 
 if __name__ == '__main__':
+
     # some config
     db_file = '../database/dns.db'
     DNS_port = 53
