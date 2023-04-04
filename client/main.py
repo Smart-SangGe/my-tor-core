@@ -36,9 +36,7 @@ def generate_key():
     private_key_base64 = base64.b64encode(private_key_bytes).decode('utf-8')
     public_key_base64 = base64.b64encode(public_key_bytes).decode('utf-8')
     
-    # private_key
-    print(private_key_bytes)
-    print(public_key_bytes)
+    return private_key_base64,public_key_base64
 
 
 # # Encrypt a message using the public key
@@ -65,10 +63,4 @@ def generate_key():
 if __name__ == '__main__':
     print("Welcome to my xiaomiao tor network")
     domain = generate_domain()
-
-    # print(domain)
-    # public_key_base64 = base64.b64encode(public_key_bytes).decode('utf-8')
-    # print(public_key_base64)
-    # public_key = base64.b64decode(public_key_base64)
-    # print(public_key)
-    generate_key()
+    private_key_base64,public_key_base64 = generate_key()
