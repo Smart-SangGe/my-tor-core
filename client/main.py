@@ -31,12 +31,13 @@ def generate_key():
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-
+    
     # Encode bytes as base64 
     private_key_base64 = base64.b64encode(private_key_bytes).decode('utf-8')
     public_key_base64 = base64.b64encode(public_key_bytes).decode('utf-8')
     
     return private_key_base64,public_key_base64
+
 
 
 # # Encrypt a message using the public key

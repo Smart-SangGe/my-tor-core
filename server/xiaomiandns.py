@@ -11,6 +11,9 @@ import time
 import sqlite3
 import re
 import base64
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+
 
 
 class DNSServer:
@@ -92,7 +95,6 @@ class DNSAPI:
     #        data: domian=xxxx&ip=xx.xx.xx.xx&pubkey=xxxxx&nodetype=xxxx
     #        /delete
     #        data: domian=xxxx&ip=xx.xx.xx.xx&prikey=xxxxx&nodetype=xxxx
-    
 
     def __init__(self, hostname, port, db_file):
         self.hostname = hostname
@@ -130,11 +132,11 @@ class DNSAPI:
             response = self.handle_post_request(url, data)
         else:
             response = self.handle_error_request()
-            
+
         return response
 
     def handle_get_request(self, url):
-        
+
         # check url start with /add
         # if re.match(r'^/add\?', url):
         #     status_code = self.add_data(url[5:])
@@ -158,7 +160,7 @@ class DNSAPI:
 
     def handle_post_request(self, url, data):
         # 处理 POST 请求，data 是 POST 方法提交的数据
-        
+
         # check url start with /add
         if re.match(r'^/add\?', url):
             status_code = self.add_data(data)
@@ -176,7 +178,7 @@ class DNSAPI:
         else:
             status_code = 400
             reason_phrase = 'unsupport api'
-        
+
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
 
@@ -190,12 +192,12 @@ class DNSAPI:
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
 
-    def add_data(self, url):
+    def add_data(self, data):
 
         # parse and check validation
-        domain, ip, pubkey, nodetype = parse_data(url)
+        domain, ip, pubkey, nodetype = self.parse_data(data)
 
-        if not check_data(url):
+        if not self.check_data(domain,ip,nodetype):
             return 400
 
         # connect db
@@ -206,10 +208,10 @@ class DNSAPI:
         c.execute(
             "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ? OR pubkey = ? OR nodetype = ?", (domain, ip, pubkey, nodetype))
         existing_data = c.fetchall()
-        
+
         cursor.close()
         conn.close()
-        
+
         if existing_data:
             return 400
         else:
@@ -218,42 +220,61 @@ class DNSAPI:
                 "INSERT INTO xiaomiandns (domain,ip,pubkey,nodetype,timestamp) VALUES (?,?,?,?,DATETIME('now'))", (domain, ip, pubkey, nodetype))
             return 200
 
-    def delete_data(self, url):
+    def delete_data(self, data):
 
         # parse and check validation
-        domain, ip, privkey, nodetype = parse_data(url)
-
-        if not check_data(url):
+        domain, ip, private_key_base64, nodetype = self.parse_data(data)
+        
+        if not self.check_data(domain, ip ,nodetype):
             return 400
 
         # connect db
         conn = sqlite3.connect(self.db_file)
         c = conn.cursor()
-
         c.execute(
-            "SELECT pubkey FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, pubkey, nodetype))
-        pubkey = c.fetchone()[0]
-        pubkey = pubkey
+            "SELECT pubkey FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, nodetype))
+        public_key_base64 = c.fetchone()
         cursor.close()
         conn.close()
-        
-        
-        
-        if existing_data:
-            return 400
+
+        if public_key_base64 != None:
+            public_key_base64 = public_key_base64[0]
         else:
-            # Insert the new data
+            return 400
+
+        private_key_bytes = base64.b64decode(
+            private_key_base64).decode("utf-8")
+
+        private_key = serialization.load_pem_private_key(
+            private_key_bytes,
+            password=None
+        )
+        
+        gen_public_key = private_key.public_key()
+        gen_public_key_bytes = gen_public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        gen_public_key_base64 = base64.b64encode(gen_public_key_bytes).decode('utf-8')
+        
+        if gen_public_key_base64 == public_key_base64:
+            conn = sqlite3.connect(self.db_file)
+            c = conn.cursor()
             c.execute(
-                "INSERT INTO xiaomiandns (domain,ip,pubkey,nodetype,timestamp) VALUES (?,?,?,?,DATETIME('now'))", (domain, ip, pubkey, nodetype))
+                "DELETE FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, nodetype))
+            cursor.close()
+            conn.close()
             return 200
+        else:
+            return 400
 
-    def parse_data(self, url):
+    def parse_data(self, data):
 
-        domain = re.search(r'domain=([^&]+)', url)
-        ip = re.search(r'ip=([^&]+)', url)
-        pubkey = re.search(r'pubkey=([^&]+)', url)
-        privkey = re.search(r'privkey=([^&]+)', url)
-        nodetype = re.search(r'nodetype=([^]+)', url)
+        domain = re.search(r'domain=([^&]+)', data)
+        ip = re.search(r'ip=([^&]+)', data)
+        pubkey = re.search(r'pubkey=([^&]+)', data)
+        privkey = re.search(r'privkey=([^&]+)', data)
+        nodetype = re.search(r'nodetype=([^]+)', data)
 
         if domain and ip and nodetype:
             domain = domain.group(1)
@@ -270,12 +291,12 @@ class DNSAPI:
 
         # check domain
         pattern = r'^[a-z0-9]{16}\.xiaomian$'
-        
+
         if re.match(pattern, domain):
             return True
         else:
             return False
-        
+
         # check ip
         pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
         if re.match(pattern, ip):
@@ -283,7 +304,7 @@ class DNSAPI:
             if all(int(octet) < 256 for octet in octets):
                 return True
         return False
-        
+
         # check nodetype
         if nodetype in {"server", "client", "node"}:
             return True
@@ -292,17 +313,29 @@ class DNSAPI:
 
 
 if __name__ == '__main__':
+    with open('serverconf.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    db_file = config['database']['db_file']
+    DNS_port = config['DNS']['port']
+    DNS_listen_host = config['DNS']['listen_host']
+    API_port = config['API']['port']
+    API_listen_host = config['API']['listen_host']
 
-    # some config
-    db_file = '../database/dns.db'
-    DNS_port = 53
-    listen_host = "0.0.0.0"
-    API_port = 81
-
+    
+        
+        
+        
+        
+        
+        
+        
+        
+        
     # start dns server
-    server = DNSServer(listen_host, DNS_port, db_file)
+    server = DNSServer(API_listen_host, DNS_port, db_file)
     server.run()
 
     # start dns api server
-    APIserver = DNSAPI(listen_host, API_port, db_file)
+    APIserver = DNSAPI(API_listen_host, API_port, db_file)
     APIserver.run()
+    
