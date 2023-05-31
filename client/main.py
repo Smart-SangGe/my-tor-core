@@ -23,21 +23,20 @@ def generate_key():
 
     # Convert keys to bytes
     private_key_bytes = private_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption()
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
     )
     public_key_bytes = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-    
-    # Encode bytes as base64 
+
+    # Encode bytes as base64
     private_key_base64 = base64.b64encode(private_key_bytes).decode('utf-8')
     public_key_base64 = base64.b64encode(public_key_bytes).decode('utf-8')
-    
-    return private_key_base64,public_key_base64
 
+    return private_key_base64, public_key_base64
 
 
 # # Encrypt a message using the public key
@@ -64,4 +63,4 @@ def generate_key():
 if __name__ == '__main__':
     print("Welcome to my xiaomiao tor network")
     domain = generate_domain()
-    private_key_base64,public_key_base64 = generate_key()
+    private_key_base64, public_key_base64 = generate_key()

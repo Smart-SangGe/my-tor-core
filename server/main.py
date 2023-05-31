@@ -11,5 +11,5 @@ if __name__ == '__main__':
     API_port = config['API']['port']
     API_listen_host = config['API']['listen_host']
 
-    DNSServer = xiaomiandns.DNSServer(listen_host, DNS_port, db_file)
+    DNSServer = xiaomiandns.DNSServer(DNS_listen_host, DNS_port, db_file)
     DNSServer.run()
