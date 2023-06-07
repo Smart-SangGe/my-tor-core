@@ -13,10 +13,12 @@ import re
 import base64
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
+import yaml
 
 
 
 class DNSServer:
+    
     def __init__(self, hostname, port, db_file):
         self.hostname = hostname
         self.port = port
@@ -90,12 +92,14 @@ class DNSServer:
 
 
 class DNSAPI:
-    # usage: use POST method
-    #        /add
-    #        data: domian=xxxx&ip=xx.xx.xx.xx&pubkey=xxxxx&nodetype=xxxx
-    #        /delete
-    #        data: domian=xxxx&ip=xx.xx.xx.xx&prikey=xxxxx&nodetype=xxxx
-
+    """
+    usage: use POST method
+           /add
+           data: domian=xxxx&ip=xx.xx.xx.xx
+           /delete
+           data: domian=xxxx&ip=xx.xx.xx.xx
+    """
+    
     def __init__(self, hostname, port, db_file):
         self.hostname = hostname
         self.port = port
@@ -131,7 +135,7 @@ class DNSAPI:
             data = request.split('\r\n')[-1]
             response = self.handle_post_request(url, data)
         else:
-            response = self.handle_error_request()
+            response = self.handle_error_request(url)
 
         return response
 
@@ -195,9 +199,9 @@ class DNSAPI:
     def add_data(self, data):
 
         # parse and check validation
-        domain, ip, pubkey, nodetype = self.parse_data(data)
+        domain, ip = self.parse_data(data)
 
-        if not self.check_data(domain,ip,nodetype):
+        if not self.check_data(domain,ip):
             return 400
 
         # connect db
@@ -206,10 +210,10 @@ class DNSAPI:
 
         # Check if the data already exists
         c.execute(
-            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ? OR pubkey = ? OR nodetype = ?", (domain, ip, pubkey, nodetype))
+            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ?", (domain, ip))
         existing_data = c.fetchall()
 
-        cursor.close()
+        c.close()
         conn.close()
 
         if existing_data:
@@ -217,102 +221,70 @@ class DNSAPI:
         else:
             # Insert the new data
             c.execute(
-                "INSERT INTO xiaomiandns (domain,ip,pubkey,nodetype,timestamp) VALUES (?,?,?,?,DATETIME('now'))", (domain, ip, pubkey, nodetype))
+                "INSERT INTO xiaomiandns (domain,ip,timestamp) VALUES (?,?,DATETIME('now'))", (domain, ip))
             return 200
 
-    def delete_data(self, data):
-
+    def delete_data(self, data:str) -> int:
         # parse and check validation
-        domain, ip, private_key_base64, nodetype = self.parse_data(data)
+        domain, ip = self.parse_data(data)
         
-        if not self.check_data(domain, ip ,nodetype):
+        if not self.check_data(domain, ip):
             return 400
 
         # connect db
+        
         conn = sqlite3.connect(self.db_file)
         c = conn.cursor()
         c.execute(
-            "SELECT pubkey FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, nodetype))
-        public_key_base64 = c.fetchone()
-        cursor.close()
+            "DELETE FROM xiaomiandns WHERE domain = ? AND ip = ?", (domain, ip))
+        c.close()
         conn.close()
+        return 200
 
-        if public_key_base64 != None:
-            public_key_base64 = public_key_base64[0]
-        else:
-            return 400
+    def parse_data(self, data:str) -> str :
+        """parse data form post data
 
-        private_key_bytes = base64.b64decode(
-            private_key_base64).decode("utf-8")
+        Args:
+            data (str): post data
 
-        private_key = serialization.load_pem_private_key(
-            private_key_bytes,
-            password=None
-        )
-        
-        gen_public_key = private_key.public_key()
-        gen_public_key_bytes = gen_public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        gen_public_key_base64 = base64.b64encode(gen_public_key_bytes).decode('utf-8')
-        
-        if gen_public_key_base64 == public_key_base64:
-            conn = sqlite3.connect(self.db_file)
-            c = conn.cursor()
-            c.execute(
-                "DELETE FROM xiaomiandns WHERE domain = ? AND ip = ? AND nodetype = ?", (domain, ip, nodetype))
-            cursor.close()
-            conn.close()
-            return 200
-        else:
-            return 400
-
-    def parse_data(self, data):
-
+        Returns:
+            domain: domain name
+            ip: ip
+        """
         domain = re.search(r'domain=([^&]+)', data)
         ip = re.search(r'ip=([^&]+)', data)
-        pubkey = re.search(r'pubkey=([^&]+)', data)
-        privkey = re.search(r'privkey=([^&]+)', data)
-        nodetype = re.search(r'nodetype=([^]+)', data)
 
-        if domain and ip and nodetype:
+        if domain and ip:
             domain = domain.group(1)
             ip = ip.group(1)
-            nodetype = nodetype.group(1)
-            if bool(pubkey) != bool(privkey):
-                if pubkey:
-                    key = pubkey.group(1)
-                else:
-                    key = privkey.group(1)
-        return domain, ip, key, nodetype
+            
+        return domain, ip
 
-    def check_data(self, domain, ip, nodetype):
+    def check_data(self, domain, ip):
+        """_summary_
 
+        Args:
+            domain (_type_): _description_
+            ip (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
         # check domain
-        pattern = r'^[a-z0-9]{16}\.xiaomian$'
-
-        if re.match(pattern, domain):
-            return True
-        else:
-            return False
-
+        domain_pattern = r'^[a-z0-9]+\.xiaomian$'
         # check ip
-        pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-        if re.match(pattern, ip):
+        ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        if re.match(domain_pattern, domain) and re.match(ip_pattern, ip) :
             octets = ip.split('.')
             if all(int(octet) < 256 for octet in octets):
                 return True
-        return False
+            else:
+                return False
 
-        # check nodetype
-        if nodetype in {"server", "client", "node"}:
-            return True
-        else:
-            return False
 
 
 if __name__ == '__main__':
+    
     with open('serverconf.yaml', 'r') as f:
         config = yaml.safe_load(f)
     db_file = config['database']['db_file']
@@ -321,16 +293,6 @@ if __name__ == '__main__':
     API_port = config['API']['port']
     API_listen_host = config['API']['listen_host']
 
-    
-        
-        
-        
-        
-        
-        
-        
-        
-        
     # start dns server
     server = DNSServer(API_listen_host, DNS_port, db_file)
     server.run()
