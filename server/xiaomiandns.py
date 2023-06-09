@@ -7,12 +7,8 @@ import dns.rdatatype
 import dns.flags
 import dns.rcode
 import dns.rrset
-import time
 import sqlite3
 import re
-import base64
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization, hashes
 import yaml
 
 
@@ -74,7 +70,7 @@ class DNSServer:
         name = question.question[0].name
         # search domain in database
         dbcursor.execute(
-            "SELECT ip FROM xiaomiandns WHERE domain = ? AND nodetype = client", (str(name)[:-1],))
+            "SELECT ip FROM xiaomiandns WHERE domain = ?", (str(name)[:-1],))
         result = dbcursor.fetchone()
 
         # Create a new RRset for the answer
@@ -135,45 +131,37 @@ class DNSAPI:
             data = request.split('\r\n')[-1]
             response = self.handle_post_request(url, data)
         else:
-            response = self.handle_error_request(url)
+            response = self.handle_error_request()
 
         return response
 
     def handle_get_request(self, url):
-
-        # check url start with /add
-        # if re.match(r'^/add\?', url):
-        #     status_code = self.add_data(url[5:])
-        #     if status_code == 200:
-        #         reason_phrase = 'Add data successful'
-        #     else:
-        #         reason_phrase = 'Add data unsuccessful'
-        # # check url start with /delete
-        # elif re.match(r'^/delete\?', url):
-        #     status_code = self.delete_data(url[9:])
-        #     if status_code == 200:
-        #         reason_phrase = 'Delete data successful'
-        #     else:
-        #         reason_phrase = 'Delete data unsuccessful'
-        # else:
-        #     status_code = 400
-        #     reason_phrase = 'unsupport api'
-
+        status_code = 400
+        reason_phrase = 'unsupport method, please use POST method'
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
 
-    def handle_post_request(self, url, data):
-        # 处理 POST 请求，data 是 POST 方法提交的数据
+    def handle_post_request(self, url:str, data:str)->str:
+        """处理 POST 请求
 
+        Args:
+            url (str): url前缀
+            data (str): POST 方法提交的数据
+
+        Returns:
+            str: http response
+        """
+        
         # check url start with /add
-        if re.match(r'^/add\?', url):
+        if re.match(r'^/add', url):
             status_code = self.add_data(data)
             if status_code == 200:
                 reason_phrase = 'Add data successful'
             else:
                 reason_phrase = 'Add data unsuccessful'
+                
         # check url start with /delete
-        elif re.match(r'^/delete\?', url):
+        elif re.match(r'^/delete', url):
             status_code = self.delete_data(data)
             if status_code == 200:
                 reason_phrase = 'Delete data successful'
@@ -186,7 +174,7 @@ class DNSAPI:
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
         return response.encode("utf-8")
 
-    def handle_error_request(self, request):
+    def handle_error_request(self):
         status_code = 400
         reason_phrase = "unsupport method"
         headers = {
@@ -194,10 +182,20 @@ class DNSAPI:
             'Connection': 'close',
         }
         response = 'HTTP/1.1 {} {}\r\n'.format(status_code, reason_phrase)
+        for key, value in headers.items():
+            response += '{}: {}\r\n'.format(key, value)
+        response += '\r\n'
         return response.encode("utf-8")
 
-    def add_data(self, data):
+    def add_data(self, data:str)->int:
+        """add data to database
 
+        Args:
+            data (str): domain and ip
+
+        Returns:
+            int: status code
+        """
         # parse and check validation
         domain, ip = self.parse_data(data)
 
@@ -208,23 +206,33 @@ class DNSAPI:
         conn = sqlite3.connect(self.db_file)
         c = conn.cursor()
 
-        # Check if the data already exists
+        # Check if the domain already exists
         c.execute(
-            "SELECT * FROM xiaomiandns WHERE domain = ? OR ip = ?", (domain, ip))
-        existing_data = c.fetchall()
+            "SELECT * FROM xiaomiandns WHERE domain = ?", [domain])
+        existing_domain = c.fetchall()
+        
 
-        c.close()
-        conn.close()
-
-        if existing_data:
-            return 400
+        if existing_domain:
+            c.execute("UPDATE xiaomiandns SET ip = ?, timestamp = DATETIME('now')  WHERE domain = ?",(ip,domain))
         else:
             # Insert the new data
             c.execute(
                 "INSERT INTO xiaomiandns (domain,ip,timestamp) VALUES (?,?,DATETIME('now'))", (domain, ip))
-            return 200
+        conn.commit()
+        c.close()
+        conn.close()
+        status_code = 200
+        return status_code
 
     def delete_data(self, data:str) -> int:
+        """delete record in database
+
+        Args:
+            data (str): domain and ip
+
+        Returns:
+            int: status code
+        """
         # parse and check validation
         domain, ip = self.parse_data(data)
         
@@ -232,14 +240,23 @@ class DNSAPI:
             return 400
 
         # connect db
-        
         conn = sqlite3.connect(self.db_file)
         c = conn.cursor()
         c.execute(
-            "DELETE FROM xiaomiandns WHERE domain = ? AND ip = ?", (domain, ip))
+            "DELETE FROM xiaomiandns WHERE domain = ? ", [domain])
+        deleted_rows = c.rowcount
+
+        if deleted_rows == 0:
+            # unmatch
+            status_code = 400
+        else:
+            # deleted
+            status_code = 200
+        conn.commit()
         c.close()
         conn.close()
-        return 200
+        
+        return status_code
 
     def parse_data(self, data:str) -> str :
         """parse data form post data
@@ -257,7 +274,6 @@ class DNSAPI:
         if domain and ip:
             domain = domain.group(1)
             ip = ip.group(1)
-            
         return domain, ip
 
     def check_data(self, domain, ip):

@@ -1,5 +1,5 @@
 database:
-  db_file : '../database/dns.db'
+  db_file : 'database/dns.db'
 DNS:
   port : 53
   listen_host : "0.0.0.0"
