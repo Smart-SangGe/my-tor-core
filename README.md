@@ -45,7 +45,11 @@ nslookup DOMAIN DNS_SERVER
 # 测试API功能
 ```console
 # Linux
+# 添加解析
 curl -d "domain=qqqwwweee.xiaomian&ip=123.12.23.34" -X POST http://10.20.117.208:81/add -i
+
+# 删除解析
+curl -d "domain=qqqwwweee.xiaomian&ip=123.12.23.34" -X POST http://10.20.117.208:81/delete -i
 
 # Windows
 Invoke-WebRequest工具一直收不到post的body，不知道问题出在哪里
