@@ -42,6 +42,8 @@ dig @DNS_SERVER -p PORT DOMAIN
 # Windows
 nslookup DOMAIN DNS_SERVER
 ```
+![DNS1](./dns1.png)
+![DNS2](./dns2.png)
 # 测试API功能
 ```console
 # Linux
@@ -53,7 +55,11 @@ curl -d "domain=qqqwwweee.xiaomian&ip=123.12.23.34" -X POST http://10.20.117.208
 
 # Windows
 Invoke-WebRequest工具一直收不到post的body，不知道问题出在哪里
-
+```
+![API add](./api_add.png)
+![database add](./database_add.png)
+![API delete](./api_delete.png)
+![database delete](./database_delete.png)
 ## 未实现的功能
 目前只能把解析记录作为a记录返回，还未实现添加其他解析记录。
 
